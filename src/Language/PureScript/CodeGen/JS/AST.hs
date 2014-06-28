@@ -230,6 +230,10 @@ data JS
   --
   | JSContinue String
   -- |
+  -- Constructor
+  --
+  | JSNew JS
+  -- |
   -- Raw Javascript (generated when parsing fails for an inline foreign import declaration)
   --
   | JSRaw String deriving (Show, Eq, Data, Typeable)
@@ -262,6 +266,7 @@ everywhereOnJS f = go
   go (JSThrow js) = f (JSThrow (go js))
   go (JSTypeOf js) = f (JSTypeOf (go js))
   go (JSLabel name js) = f (JSLabel name (go js))
+  go (JSNew j) = f (JSNew (go j))
   go other = f other
 
 everywhereOnJSTopDown :: (JS -> JS) -> JS -> JS
@@ -288,6 +293,7 @@ everywhereOnJSTopDown f = go . f
   go (JSThrow j) = JSThrow (go (f j))
   go (JSTypeOf j) = JSTypeOf (go (f j))
   go (JSLabel name j) = JSLabel name (go (f j))
+  go (JSNew j) = JSNew (go (f j))
   go other = f other
 
 everythingOnJS :: (r -> r -> r) -> (JS -> r) -> JS -> r
@@ -314,4 +320,5 @@ everythingOnJS (<>) f = go
   go j@(JSThrow j1) = f j <> go j1
   go j@(JSTypeOf j1) = f j <> go j1
   go j@(JSLabel _ j1) = f j <> go j1
+  go j@(JSNew j1) = f j <> go j1
   go other = f other

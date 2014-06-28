@@ -192,6 +192,12 @@ binary op str = AssocR match (\v1 v2 -> v1 ++ " " ++ str ++ " " ++ v2)
     match' (JSBinary op' v1 v2) | op' == op = Just (v1, v2)
     match' _ = Nothing
 
+new :: Pattern PrinterState JS ((), JS)
+new = mkPattern match
+  where
+  match (JSNew ctor) = Just ((), ctor)
+  match _ = Nothing
+
 prettyStatements :: [JS] -> StateT PrinterState Maybe String
 prettyStatements sts = do
   jss <- forM sts prettyPrintJS'
@@ -222,6 +228,7 @@ prettyPrintJS' = A.runKleisli $ runPattern matchValue
   operators =
     OperatorTable [ [ Wrap accessor $ \prop val -> val ++ "." ++ prop ]
                   , [ Wrap indexer $ \index val -> val ++ "[" ++ index ++ "]" ]
+                  , [ Wrap new $ \_ s -> "new " ++ s ]
                   , [ Wrap app $ \args val -> val ++ "(" ++ args ++ ")" ]
                   , [ Wrap lam $ \(name, args) ret -> "function "
                         ++ fromMaybe "" name

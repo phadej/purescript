@@ -79,14 +79,18 @@ importToJs mt opts mn = JSVariableIntroduction (moduleNameToJs mn) (Just moduleB
     Globals -> JSAccessor (moduleNameToJs mn) (JSVar (fromJust (optionsBrowserNamespace opts)))
 
 imports :: Declaration -> [ModuleName]
-imports =
-  let (f, _, _, _, _) = everythingOnValues (++) (const []) collect (const []) (const []) (const [])
-  in f
+imports (ImportDeclaration mn _ _) = [mn]
+imports other =
+  let (f, _, _, _, _) = everythingOnValues (++) (const []) collectV collectB (const []) (const [])
+  in f other
   where
-  collect :: Value -> [ModuleName]
-  collect (Var (Qualified (Just mn) _)) = [mn]
-  collect (Constructor (Qualified (Just mn) _)) = [mn]
-  collect _ = []
+  collectV :: Value -> [ModuleName]
+  collectV (Var (Qualified (Just mn) _)) = [mn]
+  collectV (Constructor (Qualified (Just mn) _)) = [mn]
+  collectV _ = []
+  collectB :: Binder -> [ModuleName]
+  collectB (ConstructorBinder (Qualified (Just mn) _) _) = [mn]
+  collectB _ = []
 
 -- |
 -- Generate code in the simplified Javascript intermediate representation for a declaration
@@ -101,15 +105,23 @@ declToJs opts mp (BindingGroupDeclaration vals) e = do
     return $ JSVariableIntroduction (identToJs ident) (Just js)
   return $ Just jss
 declToJs _ _ (DataDeclaration _ _ ctors) _ = do
-  return $ Just $ concat $ zipWith (\ctorIndex (ProperName ctor, tys) ->
-    [JSVariableIntroduction ctor (Just (go ctorIndex 0 tys []))]) [0..] ctors
-    where
-    go :: Integer -> Integer -> [Type] -> [JS] -> JS
-    go ctorIndex _ [] values =
-      JSObjectLiteral [ ("ctor", JSNumericLiteral (Left ctorIndex)), ("values", JSArrayLiteral $ reverse values) ]
-    go ctorIndex index (_ : tys') values =
+  return $ Just $ concat $ zipWith (\ctorIndex (pn@(ProperName ctor), tys) ->
+    let _ctor = '_' : ctor
+    in [ JSVariableIntroduction _ctor (Just (makeConstructor ctorIndex (length tys)))
+       , JSVariableIntroduction ctor  (Just (go pn 0 (length tys) []))
+       ]) [0..] ctors
+  where
+    makeConstructor :: Integer -> Int -> JS
+    makeConstructor ctorIndex n =
+      let
+        args = [ "value" ++ show index | index <- [0..n-1] ]
+        body = (JSAssignment (JSAccessor "ctor" (JSVar "this")) (JSNumericLiteral (Left ctorIndex))) : [ JSAssignment (JSAccessor arg (JSVar "this")) (JSVar arg) | arg <- args ]
+      in JSFunction Nothing args (JSBlock body)
+    go :: ProperName -> Integer -> Int -> [JS] -> JS
+    go pn _ 0 values = JSApp (JSNew (JSVar ('_' : runProperName pn))) (reverse values)
+    go pn index n values =
       JSFunction Nothing ["value" ++ show index]
-        (JSBlock [JSReturn (go ctorIndex (index + 1) tys' (JSVar ("value" ++ show index) : values))])
+        (JSBlock [JSReturn (go pn (index + 1) (n - 1) (JSVar ("value" ++ show index) : values))])
 declToJs opts mp (DataBindingGroupDeclaration ds) e = do
   jss <- mapM (\decl -> declToJs opts mp decl e) ds
   return $ Just $ concat $ catMaybes jss
@@ -121,7 +133,7 @@ declToJs _ _ _ _ = return Nothing
 -- Generate key//value pairs for an object literal exporting values from a module.
 --
 exportToJs :: DeclarationRef -> [(String, JS)]
-exportToJs (TypeRef _ (Just dctors)) = map ((\n -> (n, var (Ident n))) . runProperName) dctors
+exportToJs (TypeRef _ (Just dctors)) = concatMap ((\n -> [('_' : n, var (Ident ('_' : n))), (n, var (Ident n))]) . runProperName) dctors
 exportToJs (ValueRef name) = [(runIdent name, var name)]
 exportToJs (TypeInstanceRef name) = [(runIdent name, var name)]
 exportToJs _ = []
@@ -319,7 +331,7 @@ binderToJs m e varName done (ConstructorBinder ctor bs) = do
     argVar <- freshName
     done'' <- go (index + 1) done' bs'
     js <- binderToJs m e argVar done'' binder
-    return (JSVariableIntroduction argVar (Just (JSIndexer (JSNumericLiteral (Left index)) (JSAccessor "values" (JSVar varName)))) : js)
+    return (JSVariableIntroduction argVar (Just (JSAccessor ("value" ++ show index) (JSVar varName))) : js)
 binderToJs m e varName done (ObjectBinder bs) = go done bs
   where
   go :: (Functor m, Applicative m, Monad m) => [JS] -> [(String, Binder)] -> SupplyT m [JS]
