@@ -100,16 +100,16 @@ declToJs opts mp (BindingGroupDeclaration vals) e = do
     js <- valueToJs opts mp e val
     return $ JSVariableIntroduction (identToJs ident) (Just js)
   return $ Just jss
-declToJs _ mp (DataDeclaration _ _ ctors) _ = do
-  return $ Just $ flip concatMap ctors $ \(pn@(ProperName ctor), tys) ->
-    [JSVariableIntroduction ctor (Just (go pn 0 tys []))]
+declToJs _ _ (DataDeclaration _ _ ctors) _ = do
+  return $ Just $ concat $ zipWith (\ctorIndex (ProperName ctor, tys) ->
+    [JSVariableIntroduction ctor (Just (go ctorIndex 0 tys []))]) [0..] ctors
     where
-    go :: ProperName -> Integer -> [Type] -> [JS] -> JS
-    go pn _ [] values =
-      JSObjectLiteral [ ("ctor", JSStringLiteral (show (Qualified (Just mp) pn))), ("values", JSArrayLiteral $ reverse values) ]
-    go pn index (_ : tys') values =
+    go :: Integer -> Integer -> [Type] -> [JS] -> JS
+    go ctorIndex _ [] values =
+      JSObjectLiteral [ ("ctor", JSNumericLiteral (Left ctorIndex)), ("values", JSArrayLiteral $ reverse values) ]
+    go ctorIndex index (_ : tys') values =
       JSFunction Nothing ["value" ++ show index]
-        (JSBlock [JSReturn (go pn (index + 1) tys' (JSVar ("value" ++ show index) : values))])
+        (JSBlock [JSReturn (go ctorIndex (index + 1) tys' (JSVar ("value" ++ show index) : values))])
 declToJs opts mp (DataBindingGroupDeclaration ds) e = do
   jss <- mapM (\decl -> declToJs opts mp decl e) ds
   return $ Just $ concat $ catMaybes jss
@@ -307,13 +307,11 @@ binderToJs _ _ varName done (VarBinder ident) =
   return (JSVariableIntroduction (identToJs ident) (Just (JSVar varName)) : done)
 binderToJs m e varName done (ConstructorBinder ctor bs) = do
   js <- go 0 done bs
-  if isOnlyConstructor e ctor
-  then
-    return js
-  else
-    return [JSIfElse (JSBinary EqualTo (JSAccessor "ctor" (JSVar varName)) (JSStringLiteral (show ctor)))
-                     (JSBlock js)
-                     Nothing]
+  case isOnlyConstructor e ctor of
+    Nothing -> return js
+    Just ctorIndex -> return [ JSIfElse (JSBinary EqualTo (JSAccessor "ctor" (JSVar varName)) (JSNumericLiteral (Left ctorIndex)))
+                               (JSBlock js)
+                               Nothing ]
   where
   go :: (Functor m, Applicative m, Monad m) => Integer -> [JS] -> [Binder] -> SupplyT m [JS]
   go _ done' [] = return done'
@@ -362,12 +360,12 @@ binderToJs m e varName done (PositionedBinder _ binder) =
 -- Checks whether a data constructor is the only constructor for that type, used to simplify the
 -- check when generating code for binders.
 --
-isOnlyConstructor :: Environment -> Qualified ProperName -> Bool
+isOnlyConstructor :: Environment -> Qualified ProperName -> Maybe Integer
 isOnlyConstructor e ctor =
-  let ty = fromMaybe (error "Data constructor not found") $ ctor `M.lookup` dataConstructors e
-  in numConstructors (ctor, ty) == 1
+  let ty@(_, _, ctorIndex) = fromMaybe (error "Data constructor not found") $ ctor `M.lookup` dataConstructors e
+  in if numConstructors (ctor, ty) == 1 then Nothing else Just ctorIndex
   where
   numConstructors ty = length $ filter (((==) `on` typeConstructor) ty) $ M.toList $ dataConstructors e
-  typeConstructor (Qualified (Just moduleName) _, (tyCtor, _)) = (moduleName, tyCtor)
+  typeConstructor (Qualified (Just moduleName) _, (tyCtor, _, _)) = (moduleName, tyCtor)
   typeConstructor _ = error "Invalid argument to isOnlyConstructor"
 

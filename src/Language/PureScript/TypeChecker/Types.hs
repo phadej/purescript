@@ -650,8 +650,8 @@ infer' v@(Constructor c) = do
   env <- getEnv
   case M.lookup c (dataConstructors env) of
     Nothing -> throwError . strMsg $ "Constructor " ++ show c ++ " is undefined"
-    Just (_, ty) -> do ty' <- introduceSkolemScope <=< replaceAllTypeSynonyms $ ty
-                       return $ TypedValue True v ty'
+    Just (_, ty, _) -> do ty' <- introduceSkolemScope <=< replaceAllTypeSynonyms $ ty
+                          return $ TypedValue True v ty'
 infer' (Case vals binders) = do
   ts <- mapM infer vals
   ret <- fresh
@@ -735,7 +735,7 @@ inferBinder val (VarBinder name) = return $ M.singleton name val
 inferBinder val (ConstructorBinder ctor binders) = do
   env <- getEnv
   case M.lookup ctor (dataConstructors env) of
-    Just (_, ty) -> do
+    Just (_, ty, _) -> do
       (_, fn) <- instantiatePolyTypeWithUnknowns (error "Data constructor types cannot contain constraints") ty
       fn' <- replaceAllTypeSynonyms fn
       go binders fn'
@@ -956,7 +956,7 @@ check' (Constructor c) ty = do
   env <- getEnv
   case M.lookup c (dataConstructors env) of
     Nothing -> throwError . strMsg $ "Constructor " ++ show c ++ " is undefined"
-    Just (_, ty1) -> do
+    Just (_, ty1, _) -> do
       repl <- introduceSkolemScope <=< replaceAllTypeSynonyms $ ty1
       _ <- subsumes Nothing repl ty
       return $ TypedValue True (Constructor c) ty

@@ -43,17 +43,17 @@ addDataType :: ModuleName -> ProperName -> [String] -> [(ProperName, [Type])] ->
 addDataType moduleName name args dctors ctorKind = do
   env <- getEnv
   putEnv $ env { types = M.insert (Qualified (Just moduleName) name) (ctorKind, DataType args dctors) (types env) }
-  forM_ dctors $ \(dctor, tys) ->
+  forM_ (zip [0..] dctors) $ \(ctorIndex, (dctor, tys)) ->
     rethrow (strMsg ("Error in data constructor " ++ show dctor) <>) $
-      addDataConstructor moduleName name args dctor tys
+      addDataConstructor moduleName name args ctorIndex dctor tys
 
-addDataConstructor :: ModuleName -> ProperName -> [String] -> ProperName -> [Type] -> Check ()
-addDataConstructor moduleName name args dctor tys = do
+addDataConstructor :: ModuleName -> ProperName -> [String] -> Integer -> ProperName -> [Type] -> Check ()
+addDataConstructor moduleName name args ctorIndex dctor tys = do
   env <- getEnv
   let retTy = foldl TypeApp (TypeConstructor (Qualified (Just moduleName) name)) (map TypeVar args)
   let dctorTy = foldr function retTy tys
   let polyType = mkForAll args dctorTy
-  putEnv $ env { dataConstructors = M.insert (Qualified (Just moduleName) dctor) (name, polyType) (dataConstructors env) }
+  putEnv $ env { dataConstructors = M.insert (Qualified (Just moduleName) dctor) (name, polyType, ctorIndex) (dataConstructors env) }
 
 addTypeSynonym :: ModuleName -> ProperName -> [String] -> Type -> Kind -> Check ()
 addTypeSynonym moduleName name args ty kind = do
